@@ -1,0 +1,152 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Gamepad Browser - Label Mode</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body,html{margin:0;height:100%;font-family:Arial}
+  #toolbar{height:56px;display:flex;align-items:center;padding:6px;background:#111;color:#fff;gap:8px}
+  #toolbar input[type=text]{flex:1;padding:8px;border-radius:6px;border:1px solid #333;background:#222;color:#fff}
+  button{padding:8px 10px;border-radius:6px;border:0;background:#2b2b2b;color:#fff;cursor:pointer}
+  #hint{position:absolute;right:14px;top:10px;color:#ddd}
+  #log{position:fixed;left:10px;bottom:10px;background:rgba(0,0,0,0.6);color:#fff;padding:8px;border-radius:6px;max-width:60%}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/gamepad.js/dist/gamepad.min.js"></script>
+
+</head>
+<body>
+  <div id="toolbar">
+    <button id="back">◀</button>
+    <button id="forward">▶</button>
+    <input id="url" type="text" value="https://www.google.com" />
+    <button id="go">Go</button>
+    <button id="scan">Scan (D-pad Up)</button>
+    <button id="dev">DevView</button>
+    <!-- <div id="hint">Press D-pad Up to scan. Then press button sequence e.g. A->B = <code>ab</code>.</div> -->
+  </div>
+
+  <div id="log">Status: ready</div>
+
+<script>
+(() => {
+  const logEl = document.getElementById('log');
+  const urlInput = document.getElementById('url');
+  const goBtn = document.getElementById('go');
+  const scanBtn = document.getElementById('scan');
+  const devBtn = document.getElementById('dev');
+
+  function log(s) {
+    window.electronAPI.log(s)
+  }
+
+  goBtn.addEventListener('click', async () => {
+    const url = urlInput.value.trim();
+    log('Loading ' + url);
+    const r = await window.electronAPI.loadURLInView(url);
+    if (!r.success) log('Load error: ' + (r.message || ''));
+  });
+
+  scanBtn.addEventListener('click', async () => {
+    log('Scanning page for clickable elements...');
+    const res = await window.electronAPI.scanAndLabel();
+    log('Scan result: ' + JSON.stringify(res));
+  });
+
+  devBtn.addEventListener('click', () => {
+    window.electronAPI.openDevToolsView();
+  });
+
+  // Gamepad handling and sequence input
+  let connectedIndex = null;
+  window.addEventListener('gamepadconnected', (e) => {
+    connectedIndex = e.gamepad.index;
+    log('Gamepad connected: ' + e.gamepad.id);
+  });
+  window.addEventListener('gamepaddisconnected', (e) => {
+    if (connectedIndex === e.gamepad.index) connectedIndex = null;
+    log('Gamepad disconnected');
+  });
+
+  // Map physical buttons to single-letter tokens
+  // Standard mapping: 0=A,1=B,2=X,3=Y,4=LB,5=RB,12=DpadUp etc.
+  const buttonToToken = {
+    0: 'a', // A
+    1: 'b', // B
+    2: 'x', // X
+    3: 'y', // Y
+    4: 'l', // LB
+    5: 'r'  // RB
+  };
+
+  const triggerButtonForScan = 12; // D-pad Up (standard index 12) triggers scanning
+
+  // sequence buffer
+  let seq = '';
+  let seqTimer = null;
+  const seqTimeout = 1800; // ms to wait for second key
+
+  function clearSeq() {
+    seq = '';
+    if (seqTimer) { clearTimeout(seqTimer); seqTimer = null; }
+    log('Sequence cleared');
+  }
+
+  function handleToken(t) {
+    // append token and try activate
+    seq += t;
+    log('Sequence: ' + seq);
+    if (seqTimer) clearTimeout(seqTimer);
+    seqTimer = setTimeout(() => {
+      // time out - reset
+      clearSeq();
+    }, seqTimeout);
+
+    // we expect codeLen = 2 (as main used). Try when len == 2
+    if (seq.length >= 2) {
+      const code = seq.slice(0,2); // take first two
+      // attempt to activate
+      window.electronAPI.activateCode(code).then(res => {
+        log('Activate ' + code + ': ' + JSON.stringify(res));
+        // clear sequence regardless of success
+        clearSeq();
+      });
+    }
+  }
+
+  function gpLoop() {
+    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    log(gps);
+    const gp = gps[connectedIndex] || gps[0];
+    if (!gp) { requestAnimationFrame(gpLoop); return; }
+
+    if (!gp._prevButtons) gp._prevButtons = [];
+
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const cur = !!gp.buttons[i].pressed;
+      const prev = !!gp._prevButtons[i];
+      if (cur && !prev) {
+        // pressed event
+        if (i === triggerButtonForScan) {
+          // trigger scan
+          scanBtn.click();
+        } else if (buttonToToken[i]) {
+          handleToken(buttonToToken[i]);
+        } else {
+          // other buttons we can log or map later
+        }
+      }
+      gp._prevButtons[i] = cur;
+    }
+
+    window.requestAnimationFrame(gpLoop);
+  }
+
+  window.requestAnimationFrame(gpLoop);
+
+  // initial hint
+  log('Ready. Connect a gamepad and press D-pad Up to scan.');
+})();
+</script>
+</body>
+</html>

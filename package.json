@@ -1,0 +1,12 @@
+{
+  "name": "gamepad-chrome-browser",
+  "version": "0.2.0",
+  "description": "Electron Chromium-based browser controlled by gamepad with label-based link activation",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^26.0.0"
+  }
+}
